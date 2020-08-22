@@ -1,0 +1,287 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: 'AWS::Serverless-2016-10-31'
+Description: SURL - ShortURL
+Globals:
+  Function:
+    Timeout: 25
+    Environment:
+      Variables:
+        TABLE_NAME_LINKS: surl_links
+        ROOT_REDIRECT: 'https://example.com/'
+        404_REDIRECT: 'https://example.com/'
+        BASE_DOMAIN: 'https://example.com/'
+        CACHE_SECONDS: 300
+Resources:
+  LinksTable:
+    Type: 'AWS::DynamoDB::Table'
+    TableName: surl_links
+    AttributeDefintions:
+      - AttributeName: niceName
+        AttributeType: S
+    PrimaryKey:
+      - Name: niceName
+        Type: String
+    KeySchema:
+      - AttributeName: niceName
+        KeyType: HASH
+    ProvisionedThroughput:
+      ReadCapacityUnits: 5
+      WriteCapacityUnits: 5
+    SSESpecification:
+      SSEEnabled: false
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 20f3d16e-6d1a-4179-9ff4-35c574c0e7ac
+  RedirectFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: redirect/target/aws-redirect-lambda-package.zip
+      Handler: 'com.blakekhan.surl.aws.redirect.App::handleRequest'
+      Runtime: java11
+      MemorySize: 512
+      FunctionName: surl-redirect
+      Description: Handles redirection of clients.
+      Events:
+        SurlAPI:
+          Type: Api
+          Properties:
+            Path: '/{niceName}'
+            Method: get
+          RequestModel:
+            Model: RedirectRequest
+            Required: true
+          RequestParameters:
+            - method.request.path.niceName:
+                Required: true
+          EndpointConfiguration: EDGE
+      Policies:
+        - Version: 1012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'dynamodb:DeleteItem'
+                - 'dynamodb:GetItem'
+                - 'dynamodb:PutItem'
+                - 'dynamodb:UpdateItem'
+              Resource: !Join
+                - ''
+                - - 'arn:aws:dynamodb:'
+                  - !Ref 'AWS::Region'
+                  - ':'
+                  - !Ref 'AWS::AccountId'
+                  - ':table/surl_links'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 73563d77-2c0e-4879-8b7c-d4fa88dc3f25
+    DependsOn:
+      - LinksTable
+  DeleteLinkFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: delete-link/target/aws-deletelink-lambda-package.zip
+      Handler: 'com.blakekhan.surl.aws.delete.App::handleRequest'
+      Runtime: java11
+      MemorySize: 512
+      FunctionName: surl-redirect
+      Description: Handles deletion of short link.
+      Events:
+        SurlAPI:
+          Type: Api
+          Properties:
+            Path: '/{niceName}'
+            Method: delete
+          RequestModel:
+            Model: DeleteRequest
+            Required: true
+          RequestParameters:
+            - method.request.path.niceName:
+                Required: true
+          EndpointConfiguration: EDGE
+      Policies:
+        - Version: 1012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'dynamodb:DeleteItem'
+                - 'dynamodb:GetItem'
+                - 'dynamodb:PutItem'
+              Resource: !Join
+                - ''
+                - - 'arn:aws:dynamodb:'
+                  - !Ref 'AWS::Region'
+                  - ':'
+                  - !Ref 'AWS::AccountId'
+                  - ':table/surl_links'
+    DependsOn:
+      - LinksTable
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: fffc4832-172c-4816-8162-83cb25840dc6
+  CreateLinkFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: create-link/target/aws-createlink-lambda-package.zip
+      Handler: 'com.blakekhan.surl.aws.create.App::handleRequest'
+      Runtime: java11
+      MemorySize: 512
+      FunctionName: surl-createlink
+      Description: Handles creation of new short links.
+      Events:
+        SurlAPI:
+          Type: Api
+          Properties:
+            Path: /create
+            Method: put
+          RequestParameters:
+            - method.request.header.niceName:
+                Required: true
+            - method.request.header.destination:
+                Required: true
+            - method.request.header.expireAt:
+                Required: false
+          RequestModel:
+            Model: CreateLinkRequest
+            Required: true
+          EndpointConfiguration: EDGE
+    Policies:
+      - Version: 1012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'dynamodb:DeleteItem'
+              - 'dynamodb:GetItem'
+              - 'dynamodb:PutItem'
+              - 'dynamodb:UpdateItem'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:dynamodb:'
+                - !Ref 'AWS::Region'
+                - ':'
+                - !Ref 'AWS::AccountId'
+                - ':table/surl_links'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 591d1a78-526e-424a-a3d1-d4ce558c1389
+    DependsOn:
+      - LinksTable
+  SurlAPI:
+    Type: 'AWS::ApiGateway::Model'
+    Properties:
+      RestApiId: !Ref SurlAPI
+      ContentType: application/json
+      Description: Schema for redirect request
+      Name: CreateLinkRequest
+      Schema:
+        $schema: 'http://json-schema.org/draft-04/schema#'
+        title: CreateLinkRequest
+        type: array
+        items:
+          type: object
+          properties:
+            niceName:
+              type: string
+            destination:
+              type: string
+            expireAt:
+              type: string
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 229057c4-ee71-425b-8507-4be7b548762e
+    DependsOn:
+      - RedirectFunction
+      - CreateLinkFunction
+      - DeleteLinkFunction
+Outputs:
+  RedirectFunction:
+    Description: Redirect Lambda Function ARN
+    Value: !GetAtt
+      - RedirectFunction
+      - Arn
+  RedirectFunctionIamRole:
+    Description: Implicit IAM Role created for Redirect function
+    Value: !GetAtt
+      - RedirectFunctionRole
+      - Arn
+  CreateLinkFunction:
+    Description: CreateLink Lambda Function ARN
+    Value: !GetAtt
+      - CreateLinkFunction
+      - Arn
+  CreateLinkFunctionIamRole:
+    Description: Implicit IAM Role created for CreateLink function
+    Value: !GetAtt
+      - CreateLinkFunctionRole
+      - Arn
+  DeleteLinkFunction:
+    Description: DeleteLink Lambda Function ARN
+    Value: !GetAtt
+      - DeleteLinkFunction
+      - Arn
+  DeleteLinkFunctionIamRole:
+    Description: Implicit IAM Role created for DeleteLink function
+    Value: !GetAtt
+      - DeleteLinkFunctionRole
+      - Arn
+Metadata:
+  'AWS::CloudFormation::Designer':
+    229057c4-ee71-425b-8507-4be7b548762e:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: -10
+        'y': 100
+      z: 1
+      embeds: []
+      dependson:
+        - 73563d77-2c0e-4879-8b7c-d4fa88dc3f25
+        - 591d1a78-526e-424a-a3d1-d4ce558c1389
+        - fffc4832-172c-4816-8162-83cb25840dc6
+    591d1a78-526e-424a-a3d1-d4ce558c1389:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: -150
+        'y': 20
+      z: 1
+      embeds: []
+      dependson:
+        - 20f3d16e-6d1a-4179-9ff4-35c574c0e7ac
+    73563d77-2c0e-4879-8b7c-d4fa88dc3f25:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: -150
+        'y': 100
+      z: 1
+      embeds: []
+      dependson:
+        - 20f3d16e-6d1a-4179-9ff4-35c574c0e7ac
+    20f3d16e-6d1a-4179-9ff4-35c574c0e7ac:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: -280
+        'y': 100
+      z: 1
+      embeds: []
+    fffc4832-172c-4816-8162-83cb25840dc6:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: -150
+        'y': 180
+      z: 1
+      embeds: []
+      dependson:
+        - 20f3d16e-6d1a-4179-9ff4-35c574c0e7ac
+    8a7dd852-2cb5-4675-9609-52699a4b94cc:
+      source:
+        id: 229057c4-ee71-425b-8507-4be7b548762e
+      target:
+        id: fffc4832-172c-4816-8162-83cb25840dc6
+      z: 2

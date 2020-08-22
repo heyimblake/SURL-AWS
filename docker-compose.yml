@@ -1,0 +1,15 @@
+version: "3.7"
+
+services:
+  surl-local-dynamodb:
+    container_name: surl-db
+    image: amazon/dynamodb-local:1.13.2
+    ports:
+    - "8000:8000"
+    networks:
+      - backend
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+
+networks:
+  backend:
+    name: surl-sam-backend
